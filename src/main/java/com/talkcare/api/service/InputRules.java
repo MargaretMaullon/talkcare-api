@@ -1,5 +1,9 @@
 package com.talkcare.api.service;
 
+import com.talkcare.api.domain.UserStatus;
+import com.talkcare.api.domain.account.Account;
+import com.talkcare.api.domain.account.Client;
+import com.talkcare.api.error.ForbiddenException;
 import com.talkcare.api.error.ValidationException;
 import java.nio.charset.StandardCharsets;
 
@@ -11,6 +15,13 @@ public final class InputRules {
     private static final int MAX_PASSWORD_BYTES = 72;
 
     private InputRules() {
+    }
+
+    /** Clients may use chat, booking and reports only once an administrator has verified them. */
+    public static void requireVerifiedClient(Account actor) {
+        if (actor instanceof Client && actor.status() != UserStatus.VERIFIED) {
+            throw new ForbiddenException("Your account must be verified by an administrator before you can use TalkCare services.");
+        }
     }
 
     /** A new password: 8+ characters, at most 72 bytes. Never trimmed. */

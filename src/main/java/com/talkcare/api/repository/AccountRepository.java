@@ -157,6 +157,11 @@ public class AccountRepository {
         return id;
     }
 
+    /** Stops assigning new clients to a professional (e.g. while re-verification is pending). */
+    public void stopAcceptingClients(int id) {
+        jdbc.sql("UPDATE professionals SET is_accepting_clients = FALSE WHERE user_id = :id").param("id", id).update();
+    }
+
     /** Lets an approved professional be assigned new clients. No-op for other roles. */
     public void startAcceptingClients(int id) {
         jdbc.sql("UPDATE professionals SET is_accepting_clients = TRUE WHERE user_id = :id").param("id", id).update();

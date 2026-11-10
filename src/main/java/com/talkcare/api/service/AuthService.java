@@ -5,6 +5,7 @@ import com.talkcare.api.domain.account.Account;
 import com.talkcare.api.error.UnauthenticatedException;
 import com.talkcare.api.error.ValidationException;
 import com.talkcare.api.repository.AccountRepository;
+import com.talkcare.api.repository.ActivityRepository;
 import com.talkcare.api.repository.PasswordResetRepository;
 import com.talkcare.api.security.SessionTokenService;
 import com.talkcare.api.web.dto.ForgotPasswordRequest;
@@ -24,9 +25,11 @@ public class AuthService {
     private final PasswordEncoder passwords;
     private final SessionTokenService tokens;
     private final TransactionTemplate transaction;
+    private final ActivityRepository activity;
 
     public AuthService(AccountRepository accounts, PasswordResetRepository resets, PasswordEncoder passwords,
-                       SessionTokenService tokens, TransactionTemplate transaction) {
+                       SessionTokenService tokens, TransactionTemplate transaction, ActivityRepository activity) {
+        this.activity = activity;
         this.accounts = accounts;
         this.resets = resets;
         this.passwords = passwords;
@@ -64,9 +67,14 @@ public class AuthService {
     /** Creates a CLIENT account and signs it in. */
     public Session register(RegisterRequest request) {
         String passwordHash = passwords.encode(InputRules.newPassword(request.password()));
-        Integer id = transaction.execute(status -> accounts.createClient(new AccountRepository.NewClient(
-                request.username(), request.email(), passwordHash,
-                request.fullName(), request.contactNo(), request.address())));
+        Integer id = transaction.execute(status -> {
+            int created = accounts.createClient(new AccountRepository.NewClient(
+                    request.username(), request.email(), passwordHash,
+                    request.fullName(), request.contactNo(), request.address()));
+            activity.log(new ActivityRepository.NewActivity(created, "USER", created, "REGISTERED",
+                    "New client account registered: " + nameOr(request.fullName(), request.username())));
+            return created;
+        });
         return startSession(accounts.findById(id).orElseThrow());
     }
 
@@ -76,15 +84,25 @@ public class AuthService {
      */
     public Session registerProfessional(Role role, RegisterProfessionalRequest request) {
         String passwordHash = passwords.encode(InputRules.newPassword(request.password()));
-        Integer id = transaction.execute(status -> accounts.createProfessional(new AccountRepository.NewProfessional(
-                role, request.username(), request.email(), passwordHash, request.fullName(),
-                request.contactNo(), request.address(), request.licenseNo(), request.affiliation())));
+        Integer id = transaction.execute(status -> {
+            int created = accounts.createProfessional(new AccountRepository.NewProfessional(
+                    role, request.username(), request.email(), passwordHash, request.fullName(),
+                    request.contactNo(), request.address(), request.licenseNo(), request.affiliation()));
+            activity.log(new ActivityRepository.NewActivity(created, "USER", created, "REGISTERED",
+                    "New " + portalName(role).toLowerCase() + " account registered: "
+                            + nameOr(request.fullName(), request.username())));
+            return created;
+        });
         return startSession(accounts.findById(id).orElseThrow());
     }
 
     private static String portalName(Role role) {
         String code = role.name();
         return code.charAt(0) + code.substring(1).toLowerCase();
+    }
+
+    private static String nameOr(String fullName, String username) {
+        return fullName == null || fullName.isBlank() ? username : fullName;
     }
 
     private static String article(String word) {
@@ -101,7 +119,11 @@ public class AuthService {
         }
         String passwordHash = passwords.encode(InputRules.newPassword(request.newPassword()));
         accounts.findByEmail(request.email()).ifPresent(user ->
-                transaction.executeWithoutResult(status -> resets.replacePending(user.id(), passwordHash)));
+                transaction.executeWithoutResult(status -> {
+                    resets.replacePending(user.id(), passwordHash);
+                    activity.log(new ActivityRepository.NewActivity(user.id(), "PASSWORD_RESET", user.id(), "REQUESTED",
+                            "Password reset requested for " + user.email()));
+                }));
         return "Request sent. An administrator will review it; once approved, sign in with your new password.";
     }
 

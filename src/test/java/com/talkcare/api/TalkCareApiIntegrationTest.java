@@ -388,8 +388,20 @@ class TalkCareApiIntegrationTest {
         assertThat(resolved.body().path("remarks").asString()).isEqualTo("Looking into it\nDone");
 
         Res activity = get("/api/admin/activity", adminToken);
-        assertThat(activity.body().get(0).path("details").asString()).isEqualTo("Report RPT-0001 marked Resolved");
+        assertThat(activity.body().get(0).path("details").asString())
+                .isEqualTo("Report RPT-0001 marked Resolved by TalkCare Test Admin. Remarks: Done");
         assertThat(activity.body().get(0).path("actorName").asString()).isEqualTo("TalkCare Test Admin");
+
+        // The report went to the client's psychiatrist, who can reopen it after it was resolved.
+        assertThat(resolved.body().path("recipient").asString()).isEqualTo("PSYCHIATRIST");
+        assertThat(get("/api/reports", psychiatristToken).body()).hasSize(1);
+        Res reopened = call("PATCH", "/api/reports/" + reportId + "/status", psychiatristToken,
+                java.util.Map.of("status", "In Progress"));
+        assertThat(reopened.body().path("status").asString()).isEqualTo("IN_PROGRESS");
+        assertThat(call("PATCH", "/api/reports/" + reportId + "/status", attorneyToken,
+                java.util.Map.of("status", "Resolved")).status()).isEqualTo(404);
+        assertThat(get("/api/notifications", adminToken).body().get(0).path("message").asString())
+                .isEqualTo("Report RPT-0001 marked In Progress by Dr. Eleanor Reyes");
 
         Res users = get("/api/admin/users", adminToken);
         assertThat(users.body().size()).isGreaterThanOrEqualTo(5);
@@ -574,6 +586,27 @@ class TalkCareApiIntegrationTest {
         Res back = call("PATCH", "/api/admin/users/" + psyId + "/status", adminToken, java.util.Map.of("action", "REACTIVATE"));
         assertThat(back.body().path("status").asString()).isEqualTo("ACTIVE");
         assertThat(get("/api/notifications", login("new.psy", "Password#1")).body().toString()).contains("reactivated");
+
+        // A verified client who is suspended and reactivated goes back into the review queue,
+        // and cannot use services until an administrator approves the account again.
+        int clientId = get("/api/auth/me", clientToken).body().path("id").asInt();
+        call("PATCH", "/api/admin/users/" + clientId + "/status", adminToken, java.util.Map.of("action", "SUSPEND"));
+        Res requeued = call("PATCH", "/api/admin/users/" + clientId + "/status", adminToken,
+                java.util.Map.of("action", "REACTIVATE"));
+        assertThat(requeued.body().path("status").asString()).isEqualTo("PENDING_VERIFICATION");
+        JsonNode request = null;
+        for (JsonNode item : get("/api/admin/pending-requests", adminToken).body()) {
+            if (item.path("type").asString().equals("VERIFICATION") && item.path("userId").asInt() == clientId) {
+                request = item;
+            }
+        }
+        assertThat(request).isNotNull();
+        String token = login("test.user", "TalkCareUser#2026");
+        Res blocked = post("/api/conversations", token, java.util.Map.of("serviceType", "THOMATT"));
+        assertThat(blocked.status()).isEqualTo(403);
+        assertThat(post("/api/admin/pending-requests/action", adminToken, java.util.Map.of(
+                "type", "VERIFICATION", "id", request.path("id").asInt(), "action", "APPROVE")).status()).isEqualTo(200);
+        assertThat(post("/api/conversations", token, java.util.Map.of("serviceType", "THOMATT")).status()).isEqualTo(200);
     }
 
     @Test

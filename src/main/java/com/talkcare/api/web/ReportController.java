@@ -54,8 +54,9 @@ public class ReportController {
         return ReportResponse.from(reports.get(actor, id));
     }
 
+    /** Admins update any report; attorneys and psychiatrists the reports sent to them. */
     @PatchMapping("/{id}/status")
-    @PreAuthorize("hasAuthority('" + Permission.REPORTS_UPDATE_STATUS + "')")
+    @PreAuthorize("hasAnyAuthority('" + Permission.REPORTS_UPDATE_STATUS + "', '" + Permission.REPORTS_READ_ASSIGNED + "')")
     public ReportResponse updateStatus(@AuthenticationPrincipal Account actor, @PathVariable String id,
                                        @Valid @RequestBody UpdateReportStatusRequest request) {
         return ReportResponse.from(reports.updateStatus(actor, id, request));

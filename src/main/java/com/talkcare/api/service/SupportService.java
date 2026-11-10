@@ -54,9 +54,6 @@ public class SupportService {
     @Transactional
     public void contact(Account actor, ContactRequest request) {
         String text = "Contact message from " + request.name() + " <" + request.email() + ">: " + request.message();
-        for (int adminId : accounts.activeAdminIds()) {
-            notifications.create(adminId, Notification.SYSTEM, text);
-        }
         activity.log(new ActivityRepository.NewActivity(actor == null ? null : actor.id(), "CONTACT",
                 actor == null ? 0 : actor.id(), "MESSAGE", text.length() > 500 ? text.substring(0, 500) + "…" : text));
     }

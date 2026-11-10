@@ -22,13 +22,15 @@ public class ReportRepository {
                    COALESCE(s.full_name, up.full_name)   AS full_name,
                    COALESCE(s.email, u.email)            AS email,
                    COALESCE(s.contact_no, up.contact_no) AS contact_no,
-                   COALESCE(s.address, up.address)       AS address
+                   COALESCE(s.address, up.address)       AS address,
+                   pup.full_name AS professional_name
             FROM reports r
             JOIN service_types st      ON st.service_type_id = r.service_type_id
             JOIN concern_types ct      ON ct.concern_type_id = r.concern_type_id
             JOIN users u               ON u.id = r.client_id
             LEFT JOIN user_profiles up ON up.user_id = r.client_id
             LEFT JOIN report_snapshots s ON s.report_id = r.id
+            LEFT JOIN user_profiles pup  ON pup.user_id = r.assigned_professional_id
             """;
 
     private static final RowMapper<Report> MAPPER = (rs, n) -> new Report(
@@ -42,6 +44,7 @@ public class ReportRepository {
             rs.getString("concern_details"),
             Rows.text(rs, "remarks"),
             Rows.integer(rs, "assigned_professional_id"),
+            Rows.text(rs, "professional_name"),
             new Report.Reporter(
                     rs.getString("full_name"),
                     rs.getString("email"),
@@ -74,11 +77,13 @@ public class ReportRepository {
             int concernTypeId,
             String involvedWitness,
             String concernDetails,
+            Integer assignedProfessionalId,
             Report.Reporter reporter) {
     }
 
     /** Row locked for update while its status changes. */
-    public record LockedReport(int id, int clientId, String reportCode, ReportStatus status) {
+    public record LockedReport(int id, int clientId, String reportCode, ReportStatus status,
+                               Integer assignedProfessionalId) {
     }
 
     /**
@@ -89,9 +94,9 @@ public class ReportRepository {
         int id = jdbc.sql("""
                         WITH next AS (SELECT nextval(pg_get_serial_sequence('reports', 'id')) AS id)
                         INSERT INTO reports (id, report_code, client_id, service_type_id, concern_type_id,
-                                             involved_witness, concern_details)
+                                             involved_witness, concern_details, assigned_professional_id)
                         SELECT id, 'RPT-' || LPAD(id::text, GREATEST(4, LENGTH(id::text)), '0'),
-                               :clientId, :serviceTypeId, :concernTypeId, :witness, :details
+                               :clientId, :serviceTypeId, :concernTypeId, :witness, :details, :professionalId
                         FROM next
                         RETURNING id
                         """)
@@ -100,6 +105,7 @@ public class ReportRepository {
                 .param("concernTypeId", report.concernTypeId())
                 .param("witness", report.involvedWitness())
                 .param("details", report.concernDetails())
+                .param("professionalId", report.assignedProfessionalId())
                 .query(Integer.class)
                 .single();
         Report.Reporter reporter = report.reporter();
@@ -155,9 +161,14 @@ public class ReportRepository {
                 .list();
     }
 
+    /** Every report, newest first (the admin review list). */
+    public List<Report> listAll() {
+        return jdbc.sql(REPORT_SELECT + " ORDER BY r.created_at DESC").query(MAPPER).list();
+    }
+
     /** Locks the report; when {@code requiredStatus} is given it must currently have that status. */
     public Optional<LockedReport> lock(int id, ReportStatus requiredStatus) {
-        String sql = "SELECT id, client_id, report_code, status FROM reports WHERE id = :id"
+        String sql = "SELECT id, client_id, report_code, status, assigned_professional_id FROM reports WHERE id = :id"
                 + (requiredStatus == null ? "" : " AND status = :status") + " FOR UPDATE";
         var query = jdbc.sql(sql).param("id", id);
         if (requiredStatus != null) {
@@ -165,7 +176,8 @@ public class ReportRepository {
         }
         return query.query((rs, n) -> new LockedReport(
                         rs.getInt("id"), rs.getInt("client_id"), rs.getString("report_code"),
-                        ReportStatus.valueOf(rs.getString("status"))))
+                        ReportStatus.valueOf(rs.getString("status")),
+                        Rows.integer(rs, "assigned_professional_id")))
                 .optional();
     }
 
