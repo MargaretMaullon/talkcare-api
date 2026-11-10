@@ -48,7 +48,7 @@ public class ReportService {
     /**
      * The chosen recipient (attorney or psychiatrist) decides the service; otherwise it comes from
      * the concern type, then the requested service, else JusticeCare. The report is assigned to the
-     * client's professional for that service (or the least-loaded one) and admins always see it.
+     * client's professional for that service (or the least-loaded one), who is notified. When no professional is available it goes to the admins instead.
      */
     @Transactional
     public Report submit(Account actor, CreateReportRequest request) {
@@ -85,6 +85,10 @@ public class ReportService {
         if (professionalId != null) {
             notifications.create(professionalId, Notification.REPORT, "New report " + created.reportCode() + " from "
                     + actor.displayName() + " (" + concern.name() + ") was sent to you. Open it to review.");
+        } else {
+            notifications.notifyAdmins(Notification.REPORT, "New report " + created.reportCode() + " from "
+                    + actor.displayName() + " (" + concern.name() + ") has no available " + recipient
+                    + ". Please review it.");
         }
         return created;
     }

@@ -354,13 +354,14 @@ class TalkCareApiIntegrationTest {
         assertThat(get("/api/admin/metrics", clientToken).error()).isEqualTo("You do not have permission to perform this action.");
 
         Res metrics = get("/api/admin/metrics", adminToken);
-        assertThat(metrics.body().path("pendingApprovals").asInt()).isEqualTo(2);
+        // Only the ID verification: reports go to the attorney/psychiatrist, not the admin queue.
+        assertThat(metrics.body().path("pendingApprovals").asInt()).isEqualTo(1);
         assertThat(metrics.body().has("sessionToday")).isTrue();
 
         Res pending = get("/api/admin/pending-requests", adminToken);
-        assertThat(pending.body()).hasSize(2);
-        JsonNode verification = pending.body().get(0).path("type").asString().equals("VERIFICATION")
-                ? pending.body().get(0) : pending.body().get(1);
+        assertThat(pending.body()).hasSize(1);
+        JsonNode verification = pending.body().get(0);
+        assertThat(verification.path("type").asString()).isEqualTo("VERIFICATION");
         assertThat(verification.path("imageUrl").asString()).startsWith("/uploads/id_");
         assertThat(verification.has("reportCode")).isFalse();
 
@@ -400,8 +401,8 @@ class TalkCareApiIntegrationTest {
         assertThat(reopened.body().path("status").asString()).isEqualTo("IN_PROGRESS");
         assertThat(call("PATCH", "/api/reports/" + reportId + "/status", attorneyToken,
                 java.util.Map.of("status", "Resolved")).status()).isEqualTo(404);
-        assertThat(get("/api/notifications", adminToken).body().get(0).path("message").asString())
-                .isEqualTo("Report RPT-0001 marked In Progress by Dr. Eleanor Reyes");
+        // Report events are not sent to admins as notifications.
+        assertThat(get("/api/notifications", adminToken).body().toString()).doesNotContain("RPT-0001");
 
         Res users = get("/api/admin/users", adminToken);
         assertThat(users.body().size()).isGreaterThanOrEqualTo(5);

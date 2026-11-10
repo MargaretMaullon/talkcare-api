@@ -22,6 +22,19 @@ public class NotificationRepository {
                 .update();
     }
 
+    /** Notifies every active administrator. */
+    public void notifyAdmins(String type, String message) {
+        jdbc.sql("""
+                        INSERT INTO notifications (user_id, type, message)
+                        SELECT u.id, :type, :message
+                        FROM users u JOIN roles r ON r.role_id = u.role_id
+                        WHERE r.code = 'ADMIN' AND u.status NOT IN ('SUSPENDED', 'DEACTIVATED')
+                        """)
+                .param("type", type)
+                .param("message", message)
+                .update();
+    }
+
     /** The 50 most recent. */
     public List<Notification> findForUser(int userId) {
         return jdbc.sql("""

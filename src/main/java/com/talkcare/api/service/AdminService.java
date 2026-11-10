@@ -79,7 +79,7 @@ public class AdminService {
 
     @Transactional(readOnly = true)
     public Metrics metrics() {
-        int pending = verifications.countPending() + reports.countByStatus(ReportStatus.UNDER_REVIEW)
+        int pending = verifications.countPending() + reports.countUnassigned(ReportStatus.UNDER_REVIEW)
                 + passwordResets.countPending();
         return new Metrics(accounts.countAll(), pending, appointments.countToday(timezone));
     }
@@ -88,12 +88,15 @@ public class AdminService {
         return accounts.list(USER_LIST_LIMIT);
     }
 
-    /** Pending verifications, under-review reports and password resets the actor may act on. */
+    /**
+     * Pending verifications, password resets and under-review reports that no attorney/psychiatrist
+     * could be assigned to (assigned reports are handled by that professional).
+     */
     @Transactional(readOnly = true)
     public PendingRequests pendingRequests(Account actor) {
         return new PendingRequests(
                 actor.can(Permission.VERIFICATIONS_REVIEW) ? verifications.listPending() : List.of(),
-                actor.can(Permission.REPORTS_UPDATE_STATUS) ? reports.listByStatus(ReportStatus.UNDER_REVIEW) : List.of(),
+                actor.can(Permission.REPORTS_UPDATE_STATUS) ? reports.listUnassigned(ReportStatus.UNDER_REVIEW) : List.of(),
                 actor.can(Permission.USERS_MANAGE) ? passwordResets.listPending() : List.of());
     }
 

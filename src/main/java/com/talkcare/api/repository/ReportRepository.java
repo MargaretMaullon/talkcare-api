@@ -154,8 +154,10 @@ public class ReportRepository {
                 .list();
     }
 
-    public List<Report> listByStatus(ReportStatus status) {
-        return jdbc.sql(REPORT_SELECT + " WHERE r.status = :status ORDER BY r.created_at DESC")
+    /** Reports with no attorney/psychiatrist assigned, in the given status (the admin queue). */
+    public List<Report> listUnassigned(ReportStatus status) {
+        return jdbc.sql(REPORT_SELECT + " WHERE r.status = :status AND r.assigned_professional_id IS NULL"
+                        + " ORDER BY r.created_at DESC")
                 .param("status", status.name())
                 .query(MAPPER)
                 .list();
@@ -201,8 +203,8 @@ public class ReportRepository {
                 .update();
     }
 
-    public int countByStatus(ReportStatus status) {
-        return jdbc.sql("SELECT COUNT(*)::int FROM reports WHERE status = :status")
+    public int countUnassigned(ReportStatus status) {
+        return jdbc.sql("SELECT COUNT(*)::int FROM reports WHERE status = :status AND assigned_professional_id IS NULL")
                 .param("status", status.name())
                 .query(Integer.class)
                 .single();
