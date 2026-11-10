@@ -39,7 +39,8 @@ public class AdminService {
     private static final int USER_LIST_LIMIT = 50;
     private static final int ACTIVITY_LIMIT = 12;
     private static final Set<String> VERIFICATION_ACTIONS = Set.of("APPROVE", "REJECT");
-    private static final Set<String> REPORT_ACTIONS = Set.of("IN_PROGRESS", "RESOLVED", "ADD_REMARKS");
+    private static final Set<String> REPORT_ACTIONS = Set.of("UNDER_REVIEW", "IN_PROGRESS", "RESOLVED", "REJECTED",
+            "ADD_REMARKS");
 
     private final AccountRepository accounts;
     private final VerificationRepository verifications;
@@ -49,11 +50,13 @@ public class AdminService {
     private final NotificationRepository notifications;
     private final PasswordResetRepository passwordResets;
     private final ZoneId timezone;
+    private final ReportService reportService;
 
     public AdminService(AccountRepository accounts, VerificationRepository verifications, ReportRepository reports,
                         AppointmentRepository appointments, ActivityRepository activity,
                         NotificationRepository notifications, PasswordResetRepository passwordResets,
-                        TalkCareProperties properties) {
+                        TalkCareProperties properties, ReportService reportService) {
+        this.reportService = reportService;
         this.accounts = accounts;
         this.verifications = verifications;
         this.reports = reports;
@@ -76,7 +79,7 @@ public class AdminService {
 
     @Transactional(readOnly = true)
     public Metrics metrics() {
-        int pending = verifications.countPending() + reports.countByStatus(ReportStatus.UNDER_REVIEW)
+        int pending = verifications.countPending() + reports.countUnassigned(ReportStatus.UNDER_REVIEW)
                 + passwordResets.countPending();
         return new Metrics(accounts.countAll(), pending, appointments.countToday(timezone));
     }
@@ -85,12 +88,15 @@ public class AdminService {
         return accounts.list(USER_LIST_LIMIT);
     }
 
-    /** Pending verifications, under-review reports and password resets the actor may act on. */
+    /**
+     * Pending verifications, password resets and under-review reports that no attorney/psychiatrist
+     * could be assigned to (assigned reports are handled by that professional).
+     */
     @Transactional(readOnly = true)
     public PendingRequests pendingRequests(Account actor) {
         return new PendingRequests(
                 actor.can(Permission.VERIFICATIONS_REVIEW) ? verifications.listPending() : List.of(),
-                actor.can(Permission.REPORTS_UPDATE_STATUS) ? reports.listByStatus(ReportStatus.UNDER_REVIEW) : List.of(),
+                actor.can(Permission.REPORTS_UPDATE_STATUS) ? reports.listUnassigned(ReportStatus.UNDER_REVIEW) : List.of(),
                 actor.can(Permission.USERS_MANAGE) ? passwordResets.listPending() : List.of());
     }
 
@@ -119,7 +125,8 @@ public class AdminService {
             if (action.equals("ADD_REMARKS") && request.remarks() == null) {
                 throw new ValidationException("Please enter remarks before saving.");
             }
-            reviewReport(actor, id, action, request.remarks());
+            // Any status may be set again later (e.g. a resolved report reopened as in progress).
+            reportService.update(actor, id, action.equals("ADD_REMARKS") ? null : action, request.remarks());
         } else if ("PASSWORD_RESET".equals(request.type())) {
             if (!actor.can(Permission.USERS_MANAGE)) {
                 throw new ForbiddenException();
@@ -155,8 +162,9 @@ public class AdminService {
 
     /**
      * Suspends, deactivates or reactivates an account. Suspended and deactivated accounts cannot
-     * sign in, and their existing sessions stop working on the next request. Reactivating restores
-     * VERIFIED when the latest identity verification was approved, otherwise ACTIVE.
+     * sign in, and their existing sessions stop working on the next request. Reactivating puts the
+     * account's latest ID back into the pending-requests queue (PENDING_VERIFICATION) so an
+     * administrator reviews and approves it again; accounts that never submitted an ID become ACTIVE.
      */
     @Transactional
     public Account setUserStatus(Account actor, int userId, String action) {
@@ -168,22 +176,27 @@ public class AdminService {
         }
         Account target = accounts.findById(userId)
                 .orElseThrow(() -> new com.talkcare.api.error.NotFoundException("User not found."));
-        UserStatus status = switch (action == null ? "" : action.strip().toUpperCase(Locale.ROOT)) {
-            case "SUSPEND" -> UserStatus.SUSPENDED;
-            case "DEACTIVATE" -> UserStatus.DEACTIVATED;
-            case "REACTIVATE" -> target.verification() != null && "APPROVED".equals(target.verification().status())
-                    ? UserStatus.VERIFIED : UserStatus.ACTIVE;
+        String verb = switch (action == null ? "" : action.strip().toUpperCase(Locale.ROOT)) {
+            case "SUSPEND" -> "suspended";
+            case "DEACTIVATE" -> "deactivated";
+            case "REACTIVATE" -> "reactivated";
             default -> throw new ValidationException("Unknown account action.");
         };
+        UserStatus status;
+        if (verb.equals("reactivated")) {
+            // The account goes back into the review queue: its latest ID is resubmitted as a
+            // pending verification for an administrator to approve again.
+            boolean requeued = verifications.requeueLatest(userId);
+            status = requeued ? UserStatus.PENDING_VERIFICATION : UserStatus.ACTIVE;
+            accounts.stopAcceptingClients(userId);
+        } else {
+            status = verb.equals("suspended") ? UserStatus.SUSPENDED : UserStatus.DEACTIVATED;
+        }
         accounts.setStatus(userId, status);
-        String verb = switch (status) {
-            case SUSPENDED -> "suspended";
-            case DEACTIVATED -> "deactivated";
-            default -> "reactivated";
-        };
         activity.log(new ActivityRepository.NewActivity(actor.id(), "USER", userId, status.name(),
                 "Account " + verb + ": " + target.displayName()));
-        notifications.create(userId, Notification.SYSTEM, "Your account was " + verb + " by an administrator.");
+        notifications.create(userId, Notification.SYSTEM, "Your account was " + verb + " by an administrator."
+                + (status == UserStatus.PENDING_VERIFICATION ? " It is awaiting verification again." : ""));
         return accounts.findById(userId).orElseThrow();
     }
 
@@ -220,24 +233,5 @@ public class AdminService {
         notifications.create(request.userId(), Notification.VERIFICATION,
                 approved ? "Your account verification has been approved."
                         : "Your account verification was rejected: " + reason);
-    }
-
-    private void reviewReport(Account actor, int id, String action, String remarks) {
-        ReportRepository.LockedReport report = reports.lock(id, ReportStatus.UNDER_REVIEW)
-                .orElseThrow(() -> new ConflictException("This report is no longer pending."));
-        String details;
-        String notification;
-        if (action.equals("ADD_REMARKS")) {
-            reports.appendRemarks(id, remarks);
-            details = "Remarks added to " + report.reportCode() + ". Remarks: " + remarks;
-            notification = "A TalkCare admin added remarks to your report " + report.reportCode() + ".";
-        } else {
-            ReportStatus status = ReportStatus.valueOf(action);
-            reports.updateStatus(id, status);
-            details = "Report " + report.reportCode() + " marked " + status.label();
-            notification = "Your report " + report.reportCode() + " is now marked " + status.label() + ".";
-        }
-        activity.log(new ActivityRepository.NewActivity(actor.id(), "REPORT", id, action, details));
-        notifications.create(report.clientId(), Notification.REPORT, notification);
     }
 }

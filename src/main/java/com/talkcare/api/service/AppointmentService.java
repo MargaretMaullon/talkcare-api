@@ -66,6 +66,7 @@ public class AppointmentService {
         if (!(actor instanceof Client) || !actor.can(Permission.APPOINTMENTS_BOOK_OWN)) {
             throw new ForbiddenException("Only client accounts can book a session.");
         }
+        InputRules.requireVerifiedClient(actor);
         ServiceType service = ServiceType.fromCode(request.serviceType())
                 .orElseThrow(() -> new ValidationException("Please choose a valid TalkCare service."));
         int minutes = request.durationMinutes() == null ? 60 : request.durationMinutes();

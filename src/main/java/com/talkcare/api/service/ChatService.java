@@ -14,6 +14,7 @@ import com.talkcare.api.error.ForbiddenException;
 import com.talkcare.api.error.NotFoundException;
 import com.talkcare.api.error.ServiceUnavailableException;
 import com.talkcare.api.error.ValidationException;
+import com.talkcare.api.repository.ActivityRepository;
 import com.talkcare.api.repository.ConversationRepository;
 import com.talkcare.api.repository.LookupRepository;
 import com.talkcare.api.repository.MessageRepository;
@@ -37,9 +38,12 @@ public class ChatService {
     private final FileStorage storage;
     private final NotificationRepository notifications;
     private final TransactionTemplate transaction;
+    private final ActivityRepository activity;
 
     public ChatService(ConversationRepository conversations, MessageRepository messages, LookupRepository lookups,
-                       FileStorage storage, NotificationRepository notifications, TransactionTemplate transaction) {
+                       FileStorage storage, NotificationRepository notifications, TransactionTemplate transaction,
+                       ActivityRepository activity) {
+        this.activity = activity;
         this.conversations = conversations;
         this.messages = messages;
         this.lookups = lookups;
@@ -56,6 +60,7 @@ public class ChatService {
         if (!(actor instanceof Client)) {
             throw new ForbiddenException("Only client accounts can open a conversation.");
         }
+        InputRules.requireVerifiedClient(actor);
         ServiceType service = ServiceType.fromCode(serviceType)
                 .orElseThrow(() -> new ValidationException("Please choose a valid TalkCare service."));
         return conversations.findOpen(actor.id(), service).orElseGet(() -> create(actor, service));
@@ -72,6 +77,8 @@ public class ChatService {
                 Conversation created = conversations.findById(conversationId).orElseThrow();
                 String name = created.professionalName().isEmpty() ? "your assigned professional" : created.professionalName();
                 messages.create(NewMessage.from(conversationId, professionalId, service.welcomeMessage(name), null));
+                activity.log(new ActivityRepository.NewActivity(client.id(), "CONVERSATION", conversationId, "OPENED",
+                        client.displayName() + " started a " + created.title() + " conversation with " + name));
                 return conversationId;
             });
             return conversations.findById(id).orElseThrow();
@@ -106,6 +113,7 @@ public class ChatService {
         if (!conversation.belongsToClient(actor.id())) {
             throw new ForbiddenException("Only the client can send messages here.");
         }
+        InputRules.requireVerifiedClient(actor);
         if (!conversation.isOpen()) {
             throw new ConflictException("This conversation is closed.");
         }
@@ -121,6 +129,10 @@ public class ChatService {
                 int own = messages.create(NewMessage.from(conversation.id(), actor.id(), request.messageText(), attachment));
                 int auto = messages.create(NewMessage.autoReply(conversation.id()));
                 conversations.touch(conversation.id());
+                notifications.create(conversation.professionalId(), Notification.MESSAGE,
+                        actor.displayName() + " sent a message in " + conversation.title() + ".");
+                activity.log(new ActivityRepository.NewActivity(actor.id(), "MESSAGE", own, "SENT",
+                        actor.displayName() + " sent a message in " + conversation.title()));
                 return List.of(own, auto);
             });
             return messages.listByIds(ids);
@@ -143,6 +155,8 @@ public class ChatService {
             conversations.touch(conversation.id());
             notifications.create(conversation.clientId(), Notification.MESSAGE,
                     actor.displayName() + " replied to your " + conversation.title() + " conversation.");
+            activity.log(new ActivityRepository.NewActivity(actor.id(), "MESSAGE", messageId, "REPLIED",
+                    actor.displayName() + " replied in " + conversation.title()));
             return messageId;
         });
         return messages.listByIds(List.of(id)).getFirst();

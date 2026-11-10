@@ -5,7 +5,11 @@ import java.util.List;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** The admin audit trail ({@code activity_log}). */
+/**
+ * The admin audit trail ({@code activity_log}). Every logged event is also delivered as an
+ * in-app notification to each active administrator other than the one who caused it, except
+ * report events: concerns go to the receiving attorney/psychiatrist, not to admins.
+ */
 @Repository
 public class ActivityRepository {
 
@@ -27,6 +31,19 @@ public class ActivityRepository {
                 .param("entityType", activity.entityType())
                 .param("entityId", activity.entityId())
                 .param("action", activity.action())
+                .param("details", activity.details())
+                .update();
+        if ("REPORT".equals(activity.entityType())) {
+            return;
+        }
+        jdbc.sql("""
+                        INSERT INTO notifications (user_id, type, message)
+                        SELECT u.id, 'ACTIVITY', :details
+                        FROM users u JOIN roles r ON r.role_id = u.role_id
+                        WHERE r.code = 'ADMIN' AND u.status NOT IN ('SUSPENDED', 'DEACTIVATED')
+                          AND u.id IS DISTINCT FROM :actorId
+                        """)
+                .param("actorId", activity.actorId())
                 .param("details", activity.details())
                 .update();
     }

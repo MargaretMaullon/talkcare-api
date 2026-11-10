@@ -4,7 +4,10 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-/** {@code serviceType} is only used when the concern type is not tied to a service. */
+/**
+ * {@code recipient} (ATTORNEY or PSYCHIATRIST) chooses who receives the report; without it the
+ * service comes from the concern type, or {@code serviceType} for untied concerns.
+ */
 public record CreateReportRequest(
         @NotBlank(message = REQUIRED) @Size(max = 150, message = Inputs.TOO_LONG) String fullName,
         @NotBlank(message = REQUIRED) @Size(max = 150, message = Inputs.TOO_LONG)
@@ -14,7 +17,8 @@ public record CreateReportRequest(
         @NotBlank(message = REQUIRED) @Size(max = 100, message = Inputs.TOO_LONG) String concernType,
         @NotBlank(message = REQUIRED) @Size(max = 10000, message = Inputs.TOO_LONG) String concernDetails,
         @Size(max = 150, message = Inputs.TOO_LONG) String involvedWitness,
-        String serviceType) {
+        String serviceType,
+        String recipient) {
 
     static final String REQUIRED = "Please complete all required report fields.";
 

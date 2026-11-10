@@ -23,6 +23,8 @@ public record ReportResponse(
         String statusLabel,
         String remarks,
         Integer assignedProfessionalId,
+        String assignedProfessionalName,
+        String recipient,
         Instant createdAt,
         Instant updatedAt) {
 
@@ -32,6 +34,7 @@ public record ReportResponse(
                 r.reporter().fullName(), r.reporter().email(), r.reporter().address(), r.reporter().contactNo(),
                 r.concernType(), r.involvedWitness(), r.concernDetails(),
                 r.status(), r.status().label(), r.remarks(), r.assignedProfessionalId(),
+                r.assignedProfessionalName(), r.serviceType() == ServiceType.THOMATT ? "PSYCHIATRIST" : "ATTORNEY",
                 r.createdAt(), r.updatedAt());
     }
 }

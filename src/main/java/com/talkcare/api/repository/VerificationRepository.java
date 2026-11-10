@@ -75,7 +75,7 @@ public class VerificationRepository {
                         LEFT JOIN user_profiles up ON up.user_id = v.user_id
                         LEFT JOIN attorneys at ON at.user_id = v.user_id
                         LEFT JOIN psychiatrists ps ON ps.user_id = v.user_id
-                        WHERE v.status = 'PENDING'
+                        WHERE v.status = 'PENDING' AND u.status NOT IN ('SUSPENDED', 'DEACTIVATED')
                         ORDER BY v.submitted_at DESC
                         """)
                 .query((rs, n) -> new PendingVerification(
@@ -120,8 +120,32 @@ public class VerificationRepository {
                 .update();
     }
 
+    /**
+     * Opens a new PENDING verification copied from the user's latest one, unless one is already
+     * pending. Returns false when the user never submitted an ID. Call inside a transaction.
+     */
+    public boolean requeueLatest(int userId) {
+        Integer pending = jdbc.sql("SELECT COUNT(*)::int FROM identity_verifications WHERE user_id = :userId AND status = 'PENDING'")
+                .param("userId", userId)
+                .query(Integer.class)
+                .single();
+        if (pending > 0) {
+            return true;
+        }
+        return jdbc.sql("""
+                        INSERT INTO identity_verifications (user_id, id_type_id, id_number, document_url)
+                        SELECT user_id, id_type_id, id_number, document_url FROM identity_verifications
+                        WHERE user_id = :userId ORDER BY submitted_at DESC, id DESC LIMIT 1
+                        """)
+                .param("userId", userId)
+                .update() > 0;
+    }
+
     public int countPending() {
-        return jdbc.sql("SELECT COUNT(*)::int FROM identity_verifications WHERE status = 'PENDING'")
+        return jdbc.sql("""
+                        SELECT COUNT(*)::int FROM identity_verifications v JOIN users u ON u.id = v.user_id
+                        WHERE v.status = 'PENDING' AND u.status NOT IN ('SUSPENDED', 'DEACTIVATED')
+                        """)
                 .query(Integer.class)
                 .single();
     }

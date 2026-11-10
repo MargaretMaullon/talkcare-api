@@ -18,6 +18,7 @@ public record Report(
         String concernDetails,
         String remarks,
         Integer assignedProfessionalId,
+        String assignedProfessionalName,
         Reporter reporter,
         Instant createdAt,
         Instant updatedAt) {
