@@ -50,6 +50,7 @@ talkcare:
     username: ${TALKCARE_SMTP_USERNAME:}
     password: ${TALKCARE_SMTP_PASSWORD:}
     from: ${TALKCARE_SMTP_FROM:}
+    brevo-api-key: ${TALKCARE_BREVO_API_KEY:}
   seed:
     allow-in-production: ${ALLOW_SEED:false}
     client-password: ${SEED_CLIENT_PASSWORD:TalkCareUser#2026}

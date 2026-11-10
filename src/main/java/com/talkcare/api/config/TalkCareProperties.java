@@ -67,7 +67,12 @@ public record TalkCareProperties(
         }
     }
 
-    public record Smtp(String host, int port, String username, String password, String from) {
+    /** SMTP settings; when {@code brevoApiKey} is set, mail goes through Brevo's HTTPS API instead. */
+    public record Smtp(String host, int port, String username, String password, String from, String brevoApiKey) {
+
+        public boolean usesBrevo() {
+            return StringUtils.hasText(brevoApiKey) && StringUtils.hasText(from);
+        }
 
         public boolean isConfigured() {
             return StringUtils.hasText(host) && StringUtils.hasText(username)
