@@ -47,7 +47,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST,
                                 "/api/auth/login", "/api/auth/register", "/api/auth/logout",
                                 "/api/auth/register/attorney", "/api/auth/register/psychiatrist", "/api/contact",
-                                "/api/auth/forgot-password", "/api/auth/reset-password").permitAll()
+                                "/api/auth/forgot-password").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(errors).accessDeniedHandler(errors))
                 .addFilterBefore(new SessionAuthenticationFilter(tokens, accounts), AnonymousAuthenticationFilter.class);

@@ -8,7 +8,6 @@ import com.talkcare.api.web.dto.ForgotPasswordRequest;
 import com.talkcare.api.web.dto.LoginRequest;
 import com.talkcare.api.web.dto.RegisterProfessionalRequest;
 import com.talkcare.api.web.dto.RegisterRequest;
-import com.talkcare.api.web.dto.ResetPasswordRequest;
 import com.talkcare.api.web.dto.SimpleResponses.Info;
 import com.talkcare.api.web.dto.SimpleResponses.Success;
 import jakarta.validation.Valid;
@@ -57,11 +56,6 @@ public class AuthController {
     @PostMapping("/forgot-password")
     public Info forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
         return new Info(auth.requestPasswordReset(request));
-    }
-
-    @PostMapping("/reset-password")
-    public Info resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
-        return new Info(auth.resetPassword(request));
     }
 
     /** Tokens are stateless JWTs; logout is acknowledged and the client discards its token. */

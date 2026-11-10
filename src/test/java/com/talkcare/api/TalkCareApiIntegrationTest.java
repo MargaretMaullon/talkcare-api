@@ -575,4 +575,49 @@ class TalkCareApiIntegrationTest {
         assertThat(back.body().path("status").asString()).isEqualTo("ACTIVE");
         assertThat(get("/api/notifications", login("new.psy", "Password#1")).body().toString()).contains("reactivated");
     }
+
+    @Test
+    @Order(12)
+    void adminApprovedPasswordReset() throws Exception {
+        Res unknown = post("/api/auth/forgot-password", null,
+                java.util.Map.of("email", "nobody@talkcare.com", "newPassword", "NewPass#2026"));
+        assertThat(unknown.status()).isEqualTo(200);
+        assertThat(post("/api/auth/forgot-password", null,
+                java.util.Map.of("email", "psy@talkcare.com", "newPassword", "short")).error())
+                .isEqualTo("Password must be at least 8 characters long.");
+        assertThat(post("/api/auth/forgot-password", null,
+                java.util.Map.of("email", "psy@talkcare.com", "newPassword", "Rejected#2026")).status()).isEqualTo(200);
+        Res requested = post("/api/auth/forgot-password", null,
+                java.util.Map.of("email", "PSY@talkcare.com", "newPassword", "NewPass#2026"));
+        assertThat(requested.status()).as(requested.body().toString()).isEqualTo(200);
+
+        JsonNode reset = null;
+        int count = 0;
+        for (JsonNode item : get("/api/admin/pending-requests", adminToken).body()) {
+            if (item.path("type").asString().equals("PASSWORD_RESET")) {
+                reset = item;
+                count++;
+            }
+        }
+        assertThat(count).as("a newer request replaces the open one").isEqualTo(1);
+        assertThat(reset.path("email").asString()).isEqualTo("psy@talkcare.com");
+        assertThat(reset.has("passwordHash")).isFalse();
+        int id = reset.path("id").asInt();
+
+        assertThat(post("/api/admin/pending-requests/action", clientToken,
+                java.util.Map.of("type", "PASSWORD_RESET", "id", id, "action", "APPROVE")).status()).isEqualTo(403);
+        assertThat(login("new.psy", "Password#1")).as("unchanged until approved").isNotBlank();
+
+        Res approve = post("/api/admin/pending-requests/action", adminToken,
+                java.util.Map.of("type", "PASSWORD_RESET", "id", id, "action", "APPROVE"));
+        assertThat(approve.status()).as(approve.body().toString()).isEqualTo(200);
+        assertThat(post("/api/admin/pending-requests/action", adminToken,
+                java.util.Map.of("type", "PASSWORD_RESET", "id", id, "action", "APPROVE")).status()).isEqualTo(409);
+        assertThat(post("/api/auth/login", null, java.util.Map.of("username", "new.psy", "password", "Password#1")).status())
+                .isEqualTo(401);
+        assertThat(post("/api/auth/login", null, java.util.Map.of("username", "new.psy", "password", "Rejected#2026")).status())
+                .isEqualTo(401);
+        assertThat(get("/api/notifications", login("new.psy", "NewPass#2026")).body().toString())
+                .contains("approved your password reset");
+    }
 }

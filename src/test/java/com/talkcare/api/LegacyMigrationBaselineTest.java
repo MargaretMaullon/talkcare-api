@@ -35,13 +35,13 @@ class LegacyMigrationBaselineTest {
 
             JdbcTemplate jdbc = new JdbcTemplate(dataSource);
             assertThat(jdbc.queryForList("SELECT version || ':' || type FROM flyway_schema_history ORDER BY installed_rank", String.class))
-                    .containsExactly("4:BASELINE", "5:SQL", "6:SQL");
+                    .containsExactly("4:BASELINE", "5:SQL", "6:SQL", "7:SQL");
             assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM concern_types WHERE name = 'Mental Health Crisis'", Integer.class))
                     .isEqualTo(1);
 
             // Second start: nothing to do.
             new LegacyMigrationBaseline().migrate(flyway);
-            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history", Integer.class)).isEqualTo(3);
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM flyway_schema_history", Integer.class)).isEqualTo(4);
         }
     }
 }
