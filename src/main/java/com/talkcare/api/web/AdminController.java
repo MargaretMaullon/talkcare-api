@@ -29,7 +29,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AdminController {
 
     private static final String CAN_REVIEW = "hasAnyAuthority('" + Permission.VERIFICATIONS_REVIEW + "', '"
-            + Permission.REPORTS_UPDATE_STATUS + "')";
+            + Permission.REPORTS_UPDATE_STATUS + "', '" + Permission.USERS_MANAGE + "')";
 
     private final AdminService admin;
 
@@ -63,7 +63,7 @@ public class AdminController {
     @PreAuthorize(CAN_REVIEW)
     public List<PendingRequestResponse> pendingRequests(@AuthenticationPrincipal Account actor) {
         AdminService.PendingRequests pending = admin.pendingRequests(actor);
-        return PendingRequestResponse.merge(pending.verifications(), pending.reports());
+        return PendingRequestResponse.merge(pending.verifications(), pending.reports(), pending.passwordResets());
     }
 
     @PostMapping("/pending-requests/action")

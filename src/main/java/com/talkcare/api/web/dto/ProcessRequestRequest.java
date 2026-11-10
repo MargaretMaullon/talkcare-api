@@ -4,7 +4,7 @@ import jakarta.validation.constraints.Size;
 
 /**
  * An admin decision on a pending request: {@code type} VERIFICATION (APPROVE / REJECT) or
- * REPORT (IN_PROGRESS / RESOLVED / ADD_REMARKS). {@code id} accepts a number or numeric string.
+ * REPORT (IN_PROGRESS / RESOLVED / ADD_REMARKS) or PASSWORD_RESET (APPROVE / REJECT). {@code id} accepts a number or numeric string.
  */
 public record ProcessRequestRequest(
         String type,

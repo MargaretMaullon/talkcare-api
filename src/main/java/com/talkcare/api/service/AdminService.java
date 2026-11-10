@@ -6,6 +6,7 @@ import com.talkcare.api.domain.UserStatus;
 import com.talkcare.api.domain.activity.ActivityEntry;
 import com.talkcare.api.domain.activity.Notification;
 import com.talkcare.api.domain.account.Account;
+import com.talkcare.api.domain.account.PendingPasswordReset;
 import com.talkcare.api.domain.report.Report;
 import com.talkcare.api.domain.report.ReportStatus;
 import com.talkcare.api.domain.verification.PendingVerification;
@@ -17,6 +18,7 @@ import com.talkcare.api.repository.AccountRepository;
 import com.talkcare.api.repository.ActivityRepository;
 import com.talkcare.api.repository.AppointmentRepository;
 import com.talkcare.api.repository.NotificationRepository;
+import com.talkcare.api.repository.PasswordResetRepository;
 import com.talkcare.api.repository.ReportRepository;
 import com.talkcare.api.repository.VerificationRepository;
 import com.talkcare.api.web.dto.ProcessRequestRequest;
@@ -45,24 +47,28 @@ public class AdminService {
     private final AppointmentRepository appointments;
     private final ActivityRepository activity;
     private final NotificationRepository notifications;
+    private final PasswordResetRepository passwordResets;
     private final ZoneId timezone;
 
     public AdminService(AccountRepository accounts, VerificationRepository verifications, ReportRepository reports,
                         AppointmentRepository appointments, ActivityRepository activity,
-                        NotificationRepository notifications, TalkCareProperties properties) {
+                        NotificationRepository notifications, PasswordResetRepository passwordResets,
+                        TalkCareProperties properties) {
         this.accounts = accounts;
         this.verifications = verifications;
         this.reports = reports;
         this.appointments = appointments;
         this.activity = activity;
         this.notifications = notifications;
+        this.passwordResets = passwordResets;
         this.timezone = properties.timezone();
     }
 
     public record Metrics(int totalUsers, int pendingApprovals, int sessionsToday) {
     }
 
-    public record PendingRequests(List<PendingVerification> verifications, List<Report> reports) {
+    public record PendingRequests(List<PendingVerification> verifications, List<Report> reports,
+                                  List<PendingPasswordReset> passwordResets) {
     }
 
     public record Schedule(int year, int month, String monthName, List<Integer> days) {
@@ -70,7 +76,8 @@ public class AdminService {
 
     @Transactional(readOnly = true)
     public Metrics metrics() {
-        int pending = verifications.countPending() + reports.countByStatus(ReportStatus.UNDER_REVIEW);
+        int pending = verifications.countPending() + reports.countByStatus(ReportStatus.UNDER_REVIEW)
+                + passwordResets.countPending();
         return new Metrics(accounts.countAll(), pending, appointments.countToday(timezone));
     }
 
@@ -78,12 +85,13 @@ public class AdminService {
         return accounts.list(USER_LIST_LIMIT);
     }
 
-    /** Pending identity verifications and under-review reports the actor may act on. */
+    /** Pending verifications, under-review reports and password resets the actor may act on. */
     @Transactional(readOnly = true)
     public PendingRequests pendingRequests(Account actor) {
         return new PendingRequests(
                 actor.can(Permission.VERIFICATIONS_REVIEW) ? verifications.listPending() : List.of(),
-                actor.can(Permission.REPORTS_UPDATE_STATUS) ? reports.listByStatus(ReportStatus.UNDER_REVIEW) : List.of());
+                actor.can(Permission.REPORTS_UPDATE_STATUS) ? reports.listByStatus(ReportStatus.UNDER_REVIEW) : List.of(),
+                actor.can(Permission.USERS_MANAGE) ? passwordResets.listPending() : List.of());
     }
 
     @Transactional
@@ -112,9 +120,37 @@ public class AdminService {
                 throw new ValidationException("Please enter remarks before saving.");
             }
             reviewReport(actor, id, action, request.remarks());
+        } else if ("PASSWORD_RESET".equals(request.type())) {
+            if (!actor.can(Permission.USERS_MANAGE)) {
+                throw new ForbiddenException();
+            }
+            if (!VERIFICATION_ACTIONS.contains(action)) {
+                throw new ValidationException("Invalid password reset action.");
+            }
+            if (action.equals("REJECT") && request.reason() == null) {
+                throw new ValidationException("A rejection reason is required.");
+            }
+            reviewPasswordReset(actor, id, action.equals("APPROVE"), request.reason());
         } else {
             throw new ValidationException("Unknown request type.");
         }
+    }
+
+    /** Approving copies the requested password hash onto the account; rejecting leaves it unchanged. */
+    private void reviewPasswordReset(Account actor, int id, boolean approve, String reason) {
+        PasswordResetRepository.Locked request = passwordResets.lockPending(id)
+                .orElseThrow(() -> new ConflictException("This password reset was already handled."));
+        if (approve) {
+            accounts.updateCredentials(request.userId(), null, null, request.passwordHash());
+        }
+        passwordResets.close(id, approve, actor.id(), approve ? null : reason);
+        String name = accounts.findById(request.userId()).map(Account::displayName).orElse("user #" + request.userId());
+        activity.log(new ActivityRepository.NewActivity(actor.id(), "PASSWORD_RESET", id,
+                approve ? "APPROVED" : "REJECTED",
+                "Password reset " + (approve ? "approved" : "rejected") + ": " + name));
+        notifications.create(request.userId(), Notification.SYSTEM, approve
+                ? "An administrator approved your password reset. Sign in with your new password."
+                : "An administrator rejected your password reset: " + reason);
     }
 
     /**
